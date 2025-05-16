@@ -124,17 +124,6 @@ with st.sidebar:
         """)
     # ===== 年假计算器结束 =====
 
-    st.divider()
-    if st.button("🔄 Clear Conversation"):
-        st.session_state.messages = [{"role": "assistant", "content": "How can I help you today?"}]
-        st.session_state.doc_references = {}
-        st.session_state.chatbot = ChatBot(api_key, app_id)
-        st.rerun()
-
-
-    st.divider()
-    st.caption("© 2025 Dior HR Assistant")
-
 # ===== 聊天区 =====
 if not api_key or not app_id:
     st.warning("⚠️ Please provide App ID and API Key", icon="🔑")
@@ -376,5 +365,17 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
                 "content": "Apologies, we're experiencing technical difficulties. Please try again later or contact our technical service for assistance."
             })
 
+# ===== 功能区 =====
+# 侧边栏功能
+with st.sidebar:
+    if st.button("🔄 Clear Conversation"):
+        st.session_state.messages = [{"role": "assistant", "content": "How can I help you today?"}]
+        st.session_state.doc_references = {}
+        st.session_state.chatbot = ChatBot(api_key, app_id)
+        st.rerun()
+
+
+    st.divider()
+    st.caption("© 2025 Dior HR Assistant")
 
 
