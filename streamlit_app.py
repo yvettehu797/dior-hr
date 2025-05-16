@@ -13,7 +13,7 @@ st.caption("Powered by Qwen Max through Alibaba Cloud Bailian Platform")
 
 # ===== 配置区 =====
 with st.sidebar:
-    st.image("/workspaces/dior-test/images/截屏2025-05-09 17.19.08.png", width=150)
+    st.image("/workspaces/dior-hr/images/截屏2025-05-09 17.19.08.png", width=150)
     st.header("About This Assistant", divider="gray")
     st.caption("Dior Couture | HR")
     st.write("""
@@ -224,7 +224,7 @@ for msg in st.session_state.messages:
                         else:
                             st.warning(f"Image not found: {image_path}")
                             # 可以添加默认图片或占位符
-                            st.image("/workspaces/dior-test/images/截屏2025-05-09 17.19.08.png", caption="Placeholder Image", use_container_width=True)
+                            st.image("/workspaces/dior-hr/images/截屏2025-05-09 17.19.08.png", caption="Placeholder Image", use_container_width=True)
 
 # 用户输入处理
 if prompt := st.chat_input("Ask your HR question..."):
@@ -282,7 +282,7 @@ if prompt := st.chat_input("Ask your HR question..."):
                                 st.image(image_path, caption=f"{doc_name}", use_container_width=True)
                             else:
                                 st.warning(f"Image not found: {image_path}")
-                                st.image("/workspaces/dior-test/images/截屏2025-05-09 17.19.08.png", caption="Placeholder Image", use_container_width=True)
+                                st.image("/workspaces/dior-hr/images/截屏2025-05-09 17.19.08.png", caption="Placeholder Image", use_container_width=True)
             
             # 添加到会话历史
             st.session_state.messages.append({
