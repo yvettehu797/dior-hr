@@ -155,7 +155,7 @@ def show_image(doc_name):
         st.image(image_path, caption=f"{doc_name}", use_container_width=True)
     else:
         st.warning(f"Image not found: {image_path}")
-        st.image("/workspaces/dior-test/images/截屏2025-05-09 17.19.08.png",
+        st.image(f"images/截屏2025-05-09 17.19.08.png",
                  caption="Placeholder Image", use_container_width=True)
 
 # 辅助函数 - 显示文档引用
@@ -220,7 +220,7 @@ class ChatBot:
                     # 尝试解析JSON响应
                     response_data = json.loads(response.output.text)
                     chunk = response_data.get("result", "")
-                    refs = response_data.get("doc_references", "[]")
+                    refs = response_data.get("doc_references", [])
 
                     if stream_callback and chunk:
                         stream_callback(chunk)
@@ -320,7 +320,7 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
 
             # 后处理回复
             cleaned_response = re.sub(r'<ref>.*?</ref>', '', full_response)
-            hr_compliant_response = f"{cleaned_response}\n\n---\n*For more product information, please visit our official website.*"
+            hr_compliant_response = f"{cleaned_response}\n\n---\n*For more HR-related questions, please visit our official website.*"
 
             # 更新UI - 先显示清理后的回复
             message_placeholder.markdown(hr_compliant_response)
