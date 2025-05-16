@@ -13,7 +13,7 @@ st.caption("Powered by Qwen Max through Alibaba Cloud Bailian Platform")
 
 # ===== 配置区 =====
 with st.sidebar:
-    st.image("/workspaces/dior-hr/images/截屏2025-05-09 17.19.08.png", width=150)
+    st.image(f'images/截屏2025-05-09 17.19.08.png', width=150)
     st.header("About This Assistant", divider="gray")
     st.caption("Dior Couture | HR")
     st.write("""
