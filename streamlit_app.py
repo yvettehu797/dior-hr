@@ -284,14 +284,6 @@ with st.sidebar:
         st.session_state.show_leave_calculator = False
         st.rerun()
 
-# ===== 功能区 =====
-# 侧边栏功能
-with st.sidebar:
-    if st.button("🔄 Clear Conversation"):
-        st.session_state.messages = [{"role": "assistant", "content": "How can I help you today?"}]
-        st.session_state.doc_references = {}
-        st.session_state.chatbot = ChatBot(api_key, app_id)
-        st.rerun()
 
     st.divider()
     st.caption("© 2025 Dior HR Assistant")
