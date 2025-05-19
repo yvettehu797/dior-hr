@@ -32,57 +32,56 @@ with st.sidebar:
         top_p = st.slider("Top P", 0.0, 1.0, 0.9, 0.1)
         max_tokens = st.number_input("Max Tokens", min_value=1, max_value=4096, value=1024)
 
-    # ===== 修改：侧边栏只保留一个按钮 =====
-    show_calculator = st.button("Show Annual Leave Calculator", type="primary", use_container_width=True)
+    # 侧边栏按钮：控制年假计算器显示/隐藏
+    if "show_leave_calculator" not in st.session_state:
+        st.session_state.show_leave_calculator = False
+    if st.button(
+        "❌ Hide Annual Leave Calculator" if st.session_state.show_leave_calculator else "📅 Show Annual Leave Calculator",
+        key="toggle_leave_calculator"
+    ):
+        st.session_state.show_leave_calculator = not st.session_state.show_leave_calculator
+        st.rerun()
 
-    # ===== 移除原年假计算器模块 =====
+    st.divider()
+    st.caption("© 2025 Dior HR Assistant")
 
-# ===== 聊天区 =====
+# ===== 聊天区初始化 =====
 if not api_key or not app_id:
     st.warning("⚠️ Please provide App ID and API Key", icon="🔑")
-    st.stop()
+    # 不阻断计算器显示，仅阻断聊天功能
+    # st.stop()
 
 # 初始化会话状态
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": """
-    Bonjour! Welcome to the Dior HR Assistant.
-    \nHow can I help you today?
-    """}]
-
+    st.session_state.messages = [{"role": "assistant", "content": "Bonjour! How can I help you with HR inquiries today?"}]
 if "doc_references" not in st.session_state:
     st.session_state.doc_references = {}
-
-# 辅助函数 - 显示图片
-def show_image(doc_name):
-    image_path = f'images/{doc_name}.png'
-    if os.path.exists(image_path):
-        st.image(image_path, caption=f"{doc_name}", use_container_width=True)
-    else:
-        st.warning(f"Image not found: {image_path}")
-        st.image(f'images/截屏2025-05-09 17.19.08.png',
-                 caption="Placeholder Image", use_container_width=True)
+if "leave_calculator_state" not in st.session_state:
+    st.session_state.leave_calculator_state = {
+        "job_category": "",
+        "years_service": 0,
+        "result": None
+    }
 
 # 辅助函数 - 显示文档引用
 def show_references(doc_references):
     st.divider()
     st.subheader("📚 References")
-
     for i, reference in enumerate(doc_references):
         if isinstance(reference, dict):
             for k, v in reference.items():
                 st.caption(f"Reference {k}: {v}")
         else:
             st.caption(f"Reference {i + 1}: {reference}")
-
     with st.expander("🖼️ View Related Images"):
         for reference in doc_references:
             if isinstance(reference, dict):
                 for k, doc_name in reference.items():
-                    show_image(doc_name)
+                    st.image(f'images/{doc_name}.png', caption=doc_name, use_container_width=True)
             else:
-                show_image(reference)
+                st.image(f'images/{reference}.png', caption=reference, use_container_width=True)
 
-# 聊天机器人类 - 封装API调用逻辑
+# 聊天机器人类
 class ChatBot:
     def __init__(self, api_key: str, app_id: str):
         self.api_key = api_key
@@ -90,15 +89,10 @@ class ChatBot:
         self.messages = []
 
     def ask(self, message: str, stream_callback: Callable[[str], None] = None) -> Dict:
-        # 管理消息历史 - 保持对话长度适中
         if len(self.messages) >= 7:
             self.messages.pop(1)
             self.messages.pop(1)
-
-        # 添加新用户消息
         self.messages.append({"role": "user", "content": message})
-
-        # 调用API
         responses = Application.call(
             api_key=self.api_key,
             app_id=self.app_id,
@@ -107,59 +101,34 @@ class ChatBot:
             stream=True,
             incremental_output=True
         )
-
-        # 处理流式响应
         rsp = ''
         doc_references = []
         for response in responses:
             if response.status_code != HTTPStatus.OK:
-                print(f'request_id={response.request_id}')
-                print(f'code={response.status_code}')
-                print(f'message={response.message}')
-                print(f'请参考文档：https://help.aliyun.com/zh/model-studio/developer-reference/error-code')
+                print(f'request_id={response.request_id} code={response.status_code} message={response.message}')
             elif response.output.text is not None:
                 try:
-                    # 尝试解析JSON响应
                     response_data = json.loads(response.output.text)
                     chunk = response_data.get("result", "")
-                    refs = response_data.get("doc_references", "[]")
-                    
-                    # 健壮性处理：如果是 list 就直接用，否则尝试 json.loads()
-                    if isinstance(refs, list):
-                        refs = refs  # 已经是 list，无需转换
-                    elif isinstance(refs, str):
-                        try:
-                            refs = json.loads(refs)  # 尝试解析字符串
-                        except json.JSONDecodeError:
-                            refs = []  # 解析失败时返回空列表
-                    else:
-                        refs = []  # 其他类型也返回空列表（安全处理）
-
+                    refs = response_data.get("doc_references", [])
+                    if isinstance(refs, str):
+                        refs = json.loads(refs) if refs else []
                     if stream_callback and chunk:
                         stream_callback(chunk)
                     print(chunk, end="", flush=True)
-                    sys.stdout.flush()
                     rsp += chunk
-
-                    # 收集文档引用
-                    if refs:
-                        doc_references = refs
+                    doc_references = refs
                 except json.JSONDecodeError:
-                    # 如果不是JSON格式，直接使用原始文本
                     chunk = response.output.text
                     if stream_callback:
                         stream_callback(chunk)
                     print(chunk, end="", flush=True)
-                    sys.stdout.flush()
                     rsp += chunk
-
-        # 保存消息到历史
         self.messages.append({"role": "assistant", "content": rsp, "doc_references": doc_references})
-
         return {"full_rsp": rsp, "doc_references": doc_references}
 
 # 初始化聊天机器人
-if "chatbot" not in st.session_state:
+if "chatbot" not in st.session_state and api_key and app_id:
     st.session_state.chatbot = ChatBot(api_key, app_id)
 
 # 显示历史消息
@@ -167,126 +136,45 @@ for msg in st.session_state.messages:
     avatar = "🤖" if msg["role"] == "assistant" else "👤"
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
-
-        # 如果是助手消息且有文档引用，显示引用和图片
-        if msg["role"] == "assistant" and "doc_references" in msg and msg["doc_references"]:
-            st.divider()
-            st.subheader("📚 References")
-
-            # 显示引用列表
-            for i, reference in enumerate(msg["doc_references"]):
-                if isinstance(reference, dict):
-                    for k, v in reference.items():
-                        st.caption(f"Reference {k}: {v}")
-                else:
-                    st.caption(f"Reference {i + 1}: {reference}")
-
-            # 创建图片扩展区
-            with st.expander("🖼️ View Related Images"):
-                for reference in msg["doc_references"]:
-                    if isinstance(reference, dict):
-                        for k, doc_name in reference.items():
-                            image_path = f'images/{doc_name}.png'
-
-                            # 检查图片是否存在
-                            if os.path.exists(image_path):
-                                st.image(image_path, caption=f"{doc_name}", use_container_width=True)
-                            else:
-                                st.warning(f"Image not found: {image_path}")
-                                st.image(f'images/截屏2025-05-09 17.19.08.png', caption="Placeholder Image", use_container_width=True)
-                    else:
-                        # 处理非字典类型的引用
-                        image_path = f'images/{reference}.png'
-                        if os.path.exists(image_path):
-                            st.image(image_path, caption=f"{reference}", use_container_width=True)
+        if msg["role"] == "assistant" and msg.get("doc_references"):
+            show_references(msg["doc_references"])
 
 # 用户输入处理
-if prompt := st.chat_input("Ask a question about Dior products..."):
-    # 添加用户消息
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user", avatar="👤"):
-        st.markdown(prompt)
+if prompt := st.chat_input("Ask a question about HR policies..."):
+    if api_key and app_id:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user", avatar="👤"):
+            st.markdown(prompt)
+        with st.chat_message("assistant", avatar="🤖"):
+            message_placeholder = st.empty()
+            resp_container = [""]
+            def stream_callback(chunk: str) -> None:
+                resp_container[0] += chunk
+                message_placeholder.markdown(resp_container[0] + "▌")
+            try:
+                response = st.session_state.chatbot.ask(prompt, stream_callback)
+                full_response = response["full_rsp"]
+                doc_references = response["doc_references"]
+                cleaned_response = re.sub(r'<ref>.*?</ref>', '', full_response)
+                hr_compliant_response = f"{cleaned_response}\n\n---\n*For further HR assistance, contact your local HR representative.*"
+                message_placeholder.markdown(hr_compliant_response)
+                if doc_references:
+                    show_references(doc_references)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": hr_compliant_response,
+                    "doc_references": doc_references
+                })
+            except Exception as e:
+                message_placeholder.error(f"⚠️ Error: {str(e)}")
 
-    # 生成AI回复
-    with st.chat_message("assistant", avatar="🤖"):
-        message_placeholder = st.empty()
-        resp_container = [""]
-
-        def stream_callback(chunk: str) -> None:
-            resp_container[0] += chunk
-            message_placeholder.markdown(resp_container[0] + "▌")
-
-        try:
-            # 调用API
-            response = st.session_state.chatbot.ask(prompt, stream_callback)
-
-            # 处理响应
-            full_response = response["full_rsp"]
-            doc_references = response["doc_references"]
-
-            # 保存文档引用
-            if doc_references:
-                st.session_state.doc_references[len(st.session_state.messages)] = doc_references
-
-            # 后处理回复
-            cleaned_response = re.sub(r'<ref>.*?</ref>', '', full_response)
-            hr_compliant_response = f"{cleaned_response}\n\n---\n*For more HR-related questions, please reach out to your HR.*"
-
-            # 更新UI - 先显示清理后的回复
-            message_placeholder.markdown(hr_compliant_response)
-
-            # 立即显示文档引用（如果有）
-            if doc_references:
-                st.divider()
-                st.subheader("📚 References")
-
-                # 显示引用列表
-                for i, reference in enumerate(doc_references):
-                    if isinstance(reference, dict):
-                        for k, v in reference.items():
-                            st.caption(f"Reference {k}: {v}")
-                    else:
-                        st.caption(f"Reference {i + 1}: {reference}")
-
-                # 创建图片扩展区
-                with st.expander("🖼️ View Related Images"):
-                    for reference in doc_references:
-                        if isinstance(reference, dict):
-                            for k, doc_name in reference.items():
-                                image_path = f'images/{doc_name}.png'
-
-                                # 检查图片是否存在
-                                if os.path.exists(image_path):
-                                    st.image(image_path, caption=f"{doc_name}", use_container_width=True)
-                                else:
-                                    st.warning(f"Image not found: {image_path}")
-                                    st.image(f'images/截屏2025-05-09 17.19.08.png', caption="Placeholder Image", use_container_width=True)
-                        else:
-                            # 处理非字典类型的引用
-                            image_path = f'images/{reference}.png'
-                            if os.path.exists(image_path):
-                                st.image(image_path, caption=f"{reference}", use_container_width=True)
-
-            # 添加到会话历史
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": hr_compliant_response,
-                "doc_references": doc_references
-            })
-
-        except Exception as e:
-            error_msg = f"⚠️ Service unavailable. Technical details: {str(e)}"
-            message_placeholder.error(error_msg)
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": "Apologies, we're experiencing technical difficulties. Please try again later or contact our technical service for assistance."
-            })
-
-# ===== 修改：年假计算器移到右侧主区域 =====
-if show_calculator:
-    st.header("Annual Leave Calculator", divider="gray")
+# ===== 年假计算器模块 =====
+if st.session_state.show_leave_calculator:
+    st.divider()
+    st.header("📅 Annual Leave Calculator", divider="gray")
     
-    job_category = st.selectbox(
+    # 输入组件
+    st.session_state.leave_calculator_state["job_category"] = st.selectbox(
         "Job Category",
         options=[
             "Retail and HO General Staffs & Supervisors",
@@ -295,20 +183,23 @@ if show_calculator:
             "Sr. Flagship Boutique Manager/ Area Manager",
             "Associate Directors / Directors and above"
         ],
-        key="leave_category"
+        key="leave_category_input",
+        value=st.session_state.leave_calculator_state["job_category"]
     )
 
-    years_service = st.number_input(
+    st.session_state.leave_calculator_state["years_service"] = st.number_input(
         "Years of Service",
         min_value=0,
         max_value=50,
-        value=1,
-        key="leave_years"
+        value=st.session_state.leave_calculator_state["years_service"],
+        key="leave_years_input"
     )
 
-    # 修正后的计算逻辑（保持原有功能不变）
-    def calculate_leave(category, years):
-        # 基础年假天数
+    # 计算逻辑
+    def calculate_leave():
+        category = st.session_state.leave_calculator_state["job_category"]
+        years = st.session_state.leave_calculator_state["years_service"]
+        
         base_mapping = {
             "Retail and HO General Staffs & Supervisors": 10,
             "Retail and HO Assistant Managers": 12,
@@ -318,17 +209,15 @@ if show_calculator:
         }
         base = base_mapping.get(category, 0)
         
-        # 服务年限奖金
         bonus = 0
         if years >= 2:
             bonus += 2
             if years >= 5:
                 if category in ["Associate Directors / Directors and above", "Sr. Flagship Boutique Manager/ Area Manager"]:
-                    bonus += 1  # 特定职位类别在5年时有额外1天
+                    bonus += 1 
                 else:
-                    bonus += 3  # 其他职位类别在5年时有额外3天
-            
-        # 年假上限
+                    bonus += 3 
+        
         cap_mapping = {
             "Retail and HO General Staffs & Supervisors": 15,
             "Retail and HO Assistant Managers": 17,
@@ -337,9 +226,7 @@ if show_calculator:
             "Associate Directors / Directors and above": 23
         }
         cap = cap_mapping.get(category, 0)
-        
         total = min(base + bonus, cap)
-        
         return {
             "base_leave": base,
             "service_bonus": bonus,
@@ -347,22 +234,24 @@ if show_calculator:
             "leave_cap": cap
         }
 
-    if st.button("Calculate Annual Leave", type="primary", use_container_width=True, key="leave_calculate"):
-        result = calculate_leave(job_category, years_service)
-        
-        # 显示结果（减少一层expander嵌套）
-        st.subheader("Calculation Results")
-        st.write(f"Base Annual Leave: {result['base_leave']} days")
-        st.write(f"Service Bonus: +{result['service_bonus']} days")
-        st.write(f"Total Annual Leave: {result['total_leave']} days")
-        st.write(f"(Maximum for this category: {result['leave_cap']} days)")
-        
-        # 视觉指示器
-        percentage = (result['total_leave'] / result['leave_cap']) * 100
-        st.progress(int(percentage))
-        st.caption(f"You've reached {percentage:.1f}% of your category's maximum leave")
+    # 计算按钮
+    if st.button("Calculate Annual Leave", type="primary", key="leave_calculate_button"):
+        st.session_state.leave_calculator_state["result"] = calculate_leave()
 
-    # 政策参考表（直接展示，不嵌套expander）
+    # 显示结果
+    if st.session_state.leave_calculator_state["result"]:
+        result = st.session_state.leave_calculator_state["result"]
+        st.subheader("Calculation Results")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Base Leave", f"{result['base_leave']} days")
+            st.metric("Service Bonus", f"+{result['service_bonus']} days")
+        with col2:
+            st.metric("Total Leave", f"{result['total_leave']} days", delta=f"({result['total_leave'] / result['leave_cap'] * 100:.1f}% of max)")
+        
+        st.progress(result['total_leave'] / result['leave_cap'], text="Progress towards maximum leave")
+
+    # 政策参考表
     st.subheader("Annual Leave Policy Reference")
     st.markdown("""
     | Job Category | Base Leave | Service Bonus | Maximum Leave |
@@ -372,7 +261,19 @@ if show_calculator:
     | Managers (incl. Senior Boutique) | 15 | +2 at 2yrs, +3 at 5yrs | 20 |
     | Sr. Flagship/Area Managers | 16 | +2 at 2yrs, +1 at 5yrs | 21 |
     | Directors and above | 20 | +2 at 2yrs, +1 at 5yrs | 23 |
-    """)
+    """, unsafe_allow_html=True)
+
+# ===== 清除会话功能 =====
+with st.sidebar:
+    if st.button("🔄 Clear Conversation & Calculator"):
+        st.session_state.messages = [{"role": "assistant", "content": "Bonjour! How can I help you today?"}]
+        st.session_state.leave_calculator_state = {
+            "job_category": "",
+            "years_service": 0,
+            "result": None
+        }
+        st.session_state.show_leave_calculator = False
+        st.rerun()
 
 # ===== 功能区 =====
 # 侧边栏功能
