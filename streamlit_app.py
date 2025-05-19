@@ -32,97 +32,10 @@ with st.sidebar:
         top_p = st.slider("Top P", 0.0, 1.0, 0.9, 0.1)
         max_tokens = st.number_input("Max Tokens", min_value=1, max_value=4096, value=1024)
 
-    # ===== 新增年假计算器模块 =====
-    st.header("Annual Leave Calculator", divider="gray")
-    
-    job_category = st.selectbox(
-        "Job Category",
-        options=[
-            "Retail and HO General Staffs & Supervisors",
-            "Retail and HO Assistant Managers",
-            "Retail and HO Managers (including Senior Boutique Managers)",
-            "Sr. Flagship Boutique Manager/ Area Manager",
-            "Associate Directors / Directors and above"
-        ],
-        key="leave_category"
-    )
+    # ===== 修改：侧边栏只保留一个按钮 =====
+    show_calculator = st.button("Show Annual Leave Calculator", type="primary", use_container_width=True)
 
-    years_service = st.number_input(
-        "Years of Service",
-        min_value=0,
-        max_value=50,
-        value=1,
-        key="leave_years"
-    )
-
-    # 修正后的计算逻辑
-    def calculate_leave(category, years):
-        # 基础年假天数
-        base_mapping = {
-            "Retail and HO General Staffs & Supervisors": 10,
-            "Retail and HO Assistant Managers": 12,
-            "Retail and HO Managers (including Senior Boutique Managers)": 15,
-            "Sr. Flagship Boutique Manager/ Area Manager": 16,
-            "Associate Directors / Directors and above": 20
-        }
-        base = base_mapping.get(category, 0)
-        
-        # 服务年限奖金
-        bonus = 0
-        if years >= 2:
-            bonus += 2
-            if years >= 5:
-                if category in ["Associate Directors / Directors and above", "Sr. Flagship Boutique Manager/ Area Manager"]:
-                    bonus += 1  # 特定职位类别在5年时有额外1天
-                else:
-                    bonus += 3  # 其他职位类别在5年时有额外3天
-        
-        # 年假上限
-        cap_mapping = {
-            "Retail and HO General Staffs & Supervisors": 15,
-            "Retail and HO Assistant Managers": 17,
-            "Retail and HO Managers (including Senior Boutique Managers)": 20,
-            "Sr. Flagship Boutique Manager/ Area Manager": 21,
-            "Associate Directors / Directors and above": 23
-        }
-        cap = cap_mapping.get(category, 0)
-        
-        total = min(base + bonus, cap)
-        
-        return {
-            "base_leave": base,
-            "service_bonus": bonus,
-            "total_leave": total,
-            "leave_cap": cap
-        }
-
-    if st.button("Calculate Annual Leave", type="primary", use_container_width=True, key="leave_calculate"):
-        result = calculate_leave(job_category, years_service)
-        
-        # 显示结果
-        with st.expander("Calculation Results", expanded=True):
-            st.write(f"Base Annual Leave: {result['base_leave']} days")
-            st.write(f"Service Bonus: +{result['service_bonus']} days")
-            st.write(f"Total Annual Leave: {result['total_leave']} days")
-            st.write(f"(Maximum for this category: {result['leave_cap']} days)")
-            
-            # 视觉指示器
-            percentage = (result['total_leave'] / result['leave_cap']) * 100
-            st.progress(int(percentage))
-            st.caption(f"You've reached {percentage:.1f}% of your category's maximum leave")
-
-    # 政策参考表
-    with st.expander("Annual Leave Policy Reference"):
-        st.markdown("""
-        | Job Category | Base Leave | Service Bonus | Maximum Leave |
-        |-------------|------------|---------------|----------------|
-        | General Staffs/Supervisors | 10 | +2 at 2yrs, +3 at 5yrs | 15 |
-        | Assistant Managers | 12 | +2 at 2yrs, +3 at 5yrs | 17 |
-        | Managers (incl. Senior Boutique) | 15 | +2 at 2yrs, +3 at 5yrs | 20 |
-        | Sr. Flagship/Area Managers | 16 | +2 at 2yrs, +1 at 5yrs | 21 |
-        | Directors and above | 20 | +2 at 2yrs, +1 at 5yrs | 23 |
-        """)
-    # ===== 年假计算器结束 =====
+    # ===== 移除原年假计算器模块 =====
 
 # ===== 聊天区 =====
 if not api_key or not app_id:
@@ -168,8 +81,6 @@ def show_references(doc_references):
                     show_image(doc_name)
             else:
                 show_image(reference)
-
-
 
 # 聊天机器人类 - 封装API调用逻辑
 class ChatBot:
@@ -247,11 +158,9 @@ class ChatBot:
 
         return {"full_rsp": rsp, "doc_references": doc_references}
 
-
 # 初始化聊天机器人
 if "chatbot" not in st.session_state:
     st.session_state.chatbot = ChatBot(api_key, app_id)
-
 
 # 显示历史消息
 for msg in st.session_state.messages:
@@ -290,7 +199,6 @@ for msg in st.session_state.messages:
                         image_path = f'images/{reference}.png'
                         if os.path.exists(image_path):
                             st.image(image_path, caption=f"{reference}", use_container_width=True)
-
 
 # 用户输入处理
 if prompt := st.chat_input("Ask a question about Dior products..."):
@@ -359,8 +267,6 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
                             if os.path.exists(image_path):
                                 st.image(image_path, caption=f"{reference}", use_container_width=True)
 
-
-
             # 添加到会话历史
             st.session_state.messages.append({
                 "role": "assistant",
@@ -376,6 +282,99 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
                 "content": "Apologies, we're experiencing technical difficulties. Please try again later or contact our technical service for assistance."
             })
 
+# ===== 修改：年假计算器移到右侧主区域 =====
+if show_calculator:
+    with st.expander("📅 Annual Leave Calculator", expanded=True):
+        st.header("Annual Leave Calculator", divider="gray")
+        
+        job_category = st.selectbox(
+            "Job Category",
+            options=[
+                "Retail and HO General Staffs & Supervisors",
+                "Retail and HO Assistant Managers",
+                "Retail and HO Managers (including Senior Boutique Managers)",
+                "Sr. Flagship Boutique Manager/ Area Manager",
+                "Associate Directors / Directors and above"
+            ],
+            key="leave_category"
+        )
+
+        years_service = st.number_input(
+            "Years of Service",
+            min_value=0,
+            max_value=50,
+            value=1,
+            key="leave_years"
+        )
+
+        # 修正后的计算逻辑（保持原有功能不变）
+        def calculate_leave(category, years):
+            # 基础年假天数
+            base_mapping = {
+                "Retail and HO General Staffs & Supervisors": 10,
+                "Retail and HO Assistant Managers": 12,
+                "Retail and HO Managers (including Senior Boutique Managers)": 15,
+                "Sr. Flagship Boutique Manager/ Area Manager": 16,
+                "Associate Directors / Directors and above": 20
+            }
+            base = base_mapping.get(category, 0)
+            
+            # 服务年限奖金
+            bonus = 0
+            if years >= 2:
+                bonus += 2
+                if years >= 5:
+                    if category in ["Associate Directors / Directors and above", "Sr. Flagship Boutique Manager/ Area Manager"]:
+                        bonus += 1  # 特定职位类别在5年时有额外1天
+                    else:
+                        bonus += 3  # 其他职位类别在5年时有额外3天
+            
+            # 年假上限
+            cap_mapping = {
+                "Retail and HO General Staffs & Supervisors": 15,
+                "Retail and HO Assistant Managers": 17,
+                "Retail and HO Managers (including Senior Boutique Managers)": 20,
+                "Sr. Flagship Boutique Manager/ Area Manager": 21,
+                "Associate Directors / Directors and above": 23
+            }
+            cap = cap_mapping.get(category, 0)
+            
+            total = min(base + bonus, cap)
+            
+            return {
+                "base_leave": base,
+                "service_bonus": bonus,
+                "total_leave": total,
+                "leave_cap": cap
+            }
+
+        if st.button("Calculate Annual Leave", type="primary", use_container_width=True, key="leave_calculate"):
+            result = calculate_leave(job_category, years_service)
+            
+            # 显示结果
+            with st.expander("Calculation Results", expanded=True):
+                st.write(f"Base Annual Leave: {result['base_leave']} days")
+                st.write(f"Service Bonus: +{result['service_bonus']} days")
+                st.write(f"Total Annual Leave: {result['total_leave']} days")
+                st.write(f"(Maximum for this category: {result['leave_cap']} days)")
+                
+                # 视觉指示器
+                percentage = (result['total_leave'] / result['leave_cap']) * 100
+                st.progress(int(percentage))
+                st.caption(f"You've reached {percentage:.1f}% of your category's maximum leave")
+
+        # 政策参考表
+        with st.expander("Annual Leave Policy Reference"):
+            st.markdown("""
+            | Job Category | Base Leave | Service Bonus | Maximum Leave |
+            |-------------|------------|---------------|----------------|
+            | General Staffs/Supervisors | 10 | +2 at 2yrs, +3 at 5yrs | 15 |
+            | Assistant Managers | 12 | +2 at 2yrs, +3 at 5yrs | 17 |
+            | Managers (incl. Senior Boutique) | 15 | +2 at 2yrs, +3 at 5yrs | 20 |
+            | Sr. Flagship/Area Managers | 16 | +2 at 2yrs, +1 at 5yrs | 21 |
+            | Directors and above | 20 | +2 at 2yrs, +1 at 5yrs | 23 |
+            """)
+
 # ===== 功能区 =====
 # 侧边栏功能
 with st.sidebar:
@@ -385,8 +384,5 @@ with st.sidebar:
         st.session_state.chatbot = ChatBot(api_key, app_id)
         st.rerun()
 
-
     st.divider()
     st.caption("© 2025 Dior HR Assistant")
-
-
