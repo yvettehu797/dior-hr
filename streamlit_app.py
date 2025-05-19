@@ -170,30 +170,38 @@ if prompt := st.chat_input("Ask a question about HR policies..."):
 
 # ===== 年假计算器模块 =====
 # ===== 年假计算器模块 =====
+# ===== 年假计算器模块 =====
 if st.session_state.show_leave_calculator:
     st.divider()
     st.header("📅 Annual Leave Calculator", divider="gray")
     
-    # 输入组件（修改key为唯一值）
+    # 职位类别下拉框（修复 value -> index）
+    options = [
+        "Retail and HO General Staffs & Supervisors",
+        "Retail and HO Assistant Managers",
+        "Retail and HO Managers (including Senior Boutique Managers)",
+        "Sr. Flagship Boutique Manager/ Area Manager",
+        "Associate Directors / Directors and above"
+    ]
+    
+    # 获取当前值的索引
+    current_value = st.session_state.leave_calculator_state["job_category"]
+    current_index = options.index(current_value) if current_value in options else 0
+    
     st.session_state.leave_calculator_state["job_category"] = st.selectbox(
         "Job Category",
-        options=[
-            "Retail and HO General Staffs & Supervisors",
-            "Retail and HO Assistant Managers",
-            "Retail and HO Managers (including Senior Boutique Managers)",
-            "Sr. Flagship Boutique Manager/ Area Manager",
-            "Associate Directors / Directors and above"
-        ],
-        key="annual_leave_category_select",  # 唯一key：模块名+功能
-        value=st.session_state.leave_calculator_state["job_category"]
+        options=options,
+        key="annual_leave_category_select",
+        index=current_index  # 使用 index 参数
     )
 
+    # 服务年限输入（保持不变）
     st.session_state.leave_calculator_state["years_service"] = st.number_input(
         "Years of Service",
         min_value=0,
         max_value=50,
         value=st.session_state.leave_calculator_state["years_service"],
-        key="annual_leave_years_input",  # 唯一key：模块名+功能
+        key="annual_leave_years_input",
     )
 
     # 计算逻辑（保持不变）
