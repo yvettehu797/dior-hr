@@ -169,11 +169,12 @@ if prompt := st.chat_input("Ask a question about HR policies..."):
                 message_placeholder.error(f"⚠️ Error: {str(e)}")
 
 # ===== 年假计算器模块 =====
+# ===== 年假计算器模块 =====
 if st.session_state.show_leave_calculator:
     st.divider()
     st.header("📅 Annual Leave Calculator", divider="gray")
     
-    # 输入组件
+    # 输入组件（修改key为唯一值）
     st.session_state.leave_calculator_state["job_category"] = st.selectbox(
         "Job Category",
         options=[
@@ -183,7 +184,7 @@ if st.session_state.show_leave_calculator:
             "Sr. Flagship Boutique Manager/ Area Manager",
             "Associate Directors / Directors and above"
         ],
-        key="leave_category_input",
+        key="annual_leave_category_select",  # 唯一key：模块名+功能
         value=st.session_state.leave_calculator_state["job_category"]
     )
 
@@ -192,10 +193,10 @@ if st.session_state.show_leave_calculator:
         min_value=0,
         max_value=50,
         value=st.session_state.leave_calculator_state["years_service"],
-        key="leave_years_input"
+        key="annual_leave_years_input",  # 唯一key：模块名+功能
     )
 
-    # 计算逻辑
+    # 计算逻辑（保持不变）
     def calculate_leave():
         category = st.session_state.leave_calculator_state["job_category"]
         years = st.session_state.leave_calculator_state["years_service"]
@@ -234,11 +235,11 @@ if st.session_state.show_leave_calculator:
             "leave_cap": cap
         }
 
-    # 计算按钮
-    if st.button("Calculate Annual Leave", type="primary", key="leave_calculate_button"):
+    # 计算按钮（可选：为按钮添加唯一key）
+    if st.button("Calculate Annual Leave", type="primary", key="annual_leave_calculate_btn"):
         st.session_state.leave_calculator_state["result"] = calculate_leave()
 
-    # 显示结果
+    # 显示结果（保持不变）
     if st.session_state.leave_calculator_state["result"]:
         result = st.session_state.leave_calculator_state["result"]
         st.subheader("Calculation Results")
@@ -251,7 +252,7 @@ if st.session_state.show_leave_calculator:
         
         st.progress(result['total_leave'] / result['leave_cap'], text="Progress towards maximum leave")
 
-    # 政策参考表
+    # 政策参考表（保持不变）
     st.subheader("Annual Leave Policy Reference")
     st.markdown("""
     | Job Category | Base Leave | Service Bonus | Maximum Leave |
