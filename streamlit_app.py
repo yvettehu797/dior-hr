@@ -311,7 +311,7 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
 
             # 后处理回复
             cleaned_response = re.sub(r'<ref>.*?</ref>', '', full_response)
-            hr_compliant_response = f"{cleaned_response}\n\n---\n*For more HR-related questions, please visit our official website.*"
+            hr_compliant_response = f"{cleaned_response}\n\n---\n*For more HR-related questions, please reach out to your HR.*"
 
             # 更新UI - 先显示清理后的回复
             message_placeholder.markdown(hr_compliant_response)
