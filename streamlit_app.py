@@ -211,7 +211,18 @@ class ChatBot:
                     # 尝试解析JSON响应
                     response_data = json.loads(response.output.text)
                     chunk = response_data.get("result", "")
-                    refs = response_data.get("doc_references", [])
+                    refs = response_data.get("doc_references", "[]")
+                    
+                    # 健壮性处理：如果是 list 就直接用，否则尝试 json.loads()
+                    if isinstance(doc_str, list):
+                        doc_list = doc_str  # 已经是 list，无需转换
+                    elif isinstance(doc_str, str):
+                        try:
+                            doc_list = json.loads(doc_str)  # 尝试解析字符串
+                        except json.JSONDecodeError:
+                            doc_list = []  # 解析失败时返回空列表
+                    else:
+                        doc_list = []  # 其他类型也返回空列表（安全处理）
 
                     if stream_callback and chunk:
                         stream_callback(chunk)
