@@ -93,8 +93,6 @@ class ChatBot:
             self.messages.pop(1)
             self.messages.pop(1)
         self.messages.append({"role": "user", "content": message})
-        
-        # 启用流式调用
         responses = Application.call(
             api_key=self.api_key,
             app_id=self.app_id,
@@ -103,46 +101,30 @@ class ChatBot:
             stream=True,
             incremental_output=True
         )
-        
-        full_rsp = ""  # 存储最终解析后的result
-        raw_stream = ""  # 存储原始流式文本
-        doc_references = []  # 累积文档引用
-
+        rsp = ''
+        doc_references = []
         for response in responses:
             if response.status_code != HTTPStatus.OK:
-                print(f"请求错误: {response.message}")
-                continue
-            
-            # 获取原始流式文本（直接输出response.output.text）
-            raw_chunk = response.output.text or ""
-            raw_stream += raw_chunk
-            if stream_callback:
-                stream_callback(raw_chunk)  # 实时显示原始流式文本
-            print(raw_chunk, end="", flush=True)
-
-            # 尝试解析JSON获取result和引用（仅在完整数据时处理）
-            try:
-                response_data = json.loads(raw_chunk)  # 假设每次chunk是完整JSON
-                chunk = response_data.get("result", "")
-                refs = response_data.get("doc_references", [])
-                
-                # 累积结果和引用
-                full_rsp += chunk
-                if isinstance(refs, str):
-                    refs = json.loads(refs) if refs else []
-                doc_references.extend(refs)
-                
-            except json.JSONDecodeError:
-                # 非JSON格式时（如流式中间数据），忽略解析
-                continue
-
-        # 保存最终结果和引用
-        self.messages.append({
-            "role": "assistant", 
-            "content": full_rsp, 
-            "doc_references": doc_references
-        })
-        return {"full_rsp": full_rsp, "doc_references": doc_references}
+                print(f'request_id={response.request_id} code={response.status_code} message={response.message}')
+            elif response.output.text is not None:
+                try:
+                    response_data = json.loads(response.output.text)
+                    chunk = response_data.get("result", "")
+                    refs = response_data.get("doc_references", [])
+                    if isinstance(refs, str):
+                        refs = json.loads(refs) if refs else []
+                    if stream_callback and chunk:
+                        stream_callback(chunk)  # 发送实时内容到前端
+                    rsp += chunk
+                    doc_references.extend(refs)  # 累积引用
+                except json.JSONDecodeError:
+                    chunk = response.output.text
+                    if stream_callback:
+                        stream_callback(chunk)
+                    print(chunk, end="", flush=True)
+                    rsp += chunk
+        self.messages.append({"role": "assistant", "content": rsp, "doc_references": doc_references})
+        return {"full_rsp": rsp, "doc_references": doc_references}
 
 # 初始化聊天机器人
 if "chatbot" not in st.session_state and api_key and app_id:
@@ -156,51 +138,49 @@ for msg in st.session_state.messages:
         if msg["role"] == "assistant" and msg.get("doc_references"):
             show_references(msg["doc_references"])
 
-# 用户输入处理部分修改
+# 用户输入处理
 if prompt := st.chat_input("Ask a question about HR policies..."):
     if api_key and app_id:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
         with st.chat_message("assistant", avatar="🤖") as message_placeholder:
-            current_response = st.empty()  # 动态更新区域
-            # 使用列表存储结果（可变对象，避免nonlocal作用域问题）
-            response_container = [""]
+            # 初始化流式内容
+            current_response = st.empty()
+            full_response = ""
+            doc_references = []
+            stream_container = st.empty()
             
-            # 流式回调：显示原始文本流
-            def stream_callback(raw_chunk: str):
-                response_container[0] += raw_chunk  # 直接修改列表内容
-                current_response.markdown(response_container[0] + "▌")  # 实时显示原始流+加载符
+            def stream_callback(chunk: str) -> None:
+                nonlocal full_response
+                full_response += chunk
+                # 实时显示带加载状态的内容
+                stream_container.markdown(full_response + "▌")
             
             try:
                 response = st.session_state.chatbot.ask(prompt, stream_callback)
-                raw_stream = response_container[0]  # 获取完整原始流
-                
-                # 解析最终结果（假设最终流是完整JSON）
-                try:
-                    full_result = json.loads(raw_stream).get("result", "")
-                except:
-                    full_result = raw_stream  # 解析失败时使用原始文本
-                
-                # 清理格式并显示
-                cleaned_result = re.sub(r'<ref>.*?</ref>', '', full_result)
-                final_response = f"{cleaned_result}\n\n---\n*For further HR assistance, contact your local HR representative.*"
-                message_placeholder.markdown(final_response)
-                
-                # 处理文档引用（从API响应中获取，而非流式解析）
+                full_response = response["full_rsp"]
                 doc_references = response["doc_references"]
+                
+                # 清理引用标签并添加合规提示
+                cleaned_response = re.sub(r'<ref>.*?</ref>', '', full_response)
+                hr_compliant_response = f"{cleaned_response}\n\n---\n*For further HR assistance, contact your local HR representative.*"
+                
+                # 显示完整内容（替换加载状态）
+                message_placeholder.markdown(hr_compliant_response)
+                
                 if doc_references:
                     show_references(doc_references)
                 
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": final_response,
+                    "content": hr_compliant_response,
                     "doc_references": doc_references
                 })
                 
             except Exception as e:
                 message_placeholder.error(f"⚠️ Error: {str(e)}")
-                
+
 # ===== 年假计算器模块 =====
 if st.session_state.show_leave_calculator:
     st.divider()
