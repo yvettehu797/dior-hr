@@ -114,10 +114,10 @@ class ChatBot:
                     if isinstance(refs, str):
                         refs = json.loads(refs) if refs else []
                     if stream_callback and chunk:
-                        stream_callback(chunk)
+                        stream_callback(chunk)  # 发送实时内容到前端
                     print(chunk, end="", flush=True)
                     rsp += chunk
-                    doc_references = refs
+                    doc_references.extend(refs)  # 累积引用
                 except json.JSONDecodeError:
                     chunk = response.output.text
                     if stream_callback:
@@ -145,37 +145,47 @@ if prompt := st.chat_input("Ask a question about HR policies..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
-        with st.chat_message("assistant", avatar="🤖"):
-            message_placeholder = st.empty()
-            resp_container = [""]
+        with st.chat_message("assistant", avatar="🤖") as message_placeholder:
+            # 初始化流式内容
+            current_response = st.empty()
+            full_response = ""
+            doc_references = []
+            
             def stream_callback(chunk: str) -> None:
-                resp_container[0] += chunk
-                message_placeholder.markdown(resp_container[0] + "▌")
+                nonlocal full_response
+                full_response += chunk
+                # 实时显示带加载状态的内容
+                current_response.markdown(full_response + "▌")
+            
             try:
                 response = st.session_state.chatbot.ask(prompt, stream_callback)
                 full_response = response["full_rsp"]
                 doc_references = response["doc_references"]
+                
+                # 清理引用标签并添加合规提示
                 cleaned_response = re.sub(r'<ref>.*?</ref>', '', full_response)
                 hr_compliant_response = f"{cleaned_response}\n\n---\n*For further HR assistance, contact your local HR representative.*"
+                
+                # 显示完整内容（替换加载状态）
                 message_placeholder.markdown(hr_compliant_response)
+                
                 if doc_references:
                     show_references(doc_references)
+                
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": hr_compliant_response,
                     "doc_references": doc_references
                 })
+                
             except Exception as e:
                 message_placeholder.error(f"⚠️ Error: {str(e)}")
 
-# ===== 年假计算器模块 =====
-# ===== 年假计算器模块 =====
 # ===== 年假计算器模块 =====
 if st.session_state.show_leave_calculator:
     st.divider()
     st.header("📅 Annual Leave Calculator", divider="gray")
     
-    # 职位类别下拉框（修复 value -> index）
     options = [
         "Retail and HO General Staffs & Supervisors",
         "Retail and HO Assistant Managers",
@@ -184,7 +194,6 @@ if st.session_state.show_leave_calculator:
         "Associate Directors / Directors and above"
     ]
     
-    # 获取当前值的索引
     current_value = st.session_state.leave_calculator_state["job_category"]
     current_index = options.index(current_value) if current_value in options else 0
     
@@ -192,10 +201,9 @@ if st.session_state.show_leave_calculator:
         "Job Category",
         options=options,
         key="annual_leave_category_select",
-        index=current_index  # 使用 index 参数
+        index=current_index
     )
 
-    # 服务年限输入（保持不变）
     st.session_state.leave_calculator_state["years_service"] = st.number_input(
         "Years of Service",
         min_value=0,
@@ -204,7 +212,6 @@ if st.session_state.show_leave_calculator:
         key="annual_leave_years_input",
     )
 
-    # 计算逻辑（保持不变）
     def calculate_leave():
         category = st.session_state.leave_calculator_state["job_category"]
         years = st.session_state.leave_calculator_state["years_service"]
@@ -243,11 +250,9 @@ if st.session_state.show_leave_calculator:
             "leave_cap": cap
         }
 
-    # 计算按钮（可选：为按钮添加唯一key）
     if st.button("Calculate Annual Leave", type="primary", key="annual_leave_calculate_btn"):
         st.session_state.leave_calculator_state["result"] = calculate_leave()
 
-    # 显示结果（保持不变）
     if st.session_state.leave_calculator_state["result"]:
         result = st.session_state.leave_calculator_state["result"]
         st.subheader("Calculation Results")
@@ -260,7 +265,6 @@ if st.session_state.show_leave_calculator:
         
         st.progress(result['total_leave'] / result['leave_cap'], text="Progress towards maximum leave")
 
-    # 政策参考表（保持不变）
     st.subheader("Annual Leave Policy Reference")
     st.markdown("""
     | Job Category | Base Leave | Service Bonus | Maximum Leave |
@@ -285,7 +289,6 @@ with st.sidebar:
         st.session_state.doc_references = {}
         st.session_state.chatbot = ChatBot(api_key, app_id)
         st.rerun()
-
 
     st.divider()
     st.caption("© 2025 Dior HR Assistant")
