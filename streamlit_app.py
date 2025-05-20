@@ -282,6 +282,8 @@ with st.sidebar:
             "result": None
         }
         st.session_state.show_leave_calculator = False
+        st.session_state.doc_references = {}
+        st.session_state.chatbot = ChatBot(api_key, app_id)
         st.rerun()
 
 
