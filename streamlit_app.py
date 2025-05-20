@@ -3,7 +3,9 @@ from dashscope import Application
 from http import HTTPStatus
 import os
 import re
+import sys
 import json
+import pandas as pd
 from typing import Dict, Callable, List, Any
 
 # 页面设置
@@ -46,6 +48,8 @@ with st.sidebar:
 # ===== 聊天区初始化 =====
 if not api_key or not app_id:
     st.warning("⚠️ Please provide App ID and API Key", icon="🔑")
+    # 不阻断计算器显示，仅阻断聊天功能
+    # st.stop()
 
 # 初始化会话状态
 if "messages" not in st.session_state:
@@ -82,28 +86,21 @@ class ChatBot:
     def __init__(self, api_key: str, app_id: str):
         self.api_key = api_key
         self.app_id = app_id
-        self.messages = []  # 存储对话历史（不包含会话状态中的全局消息）
+        self.messages = []
 
     def ask(self, message: str, stream_callback: Callable[[str], None] = None) -> Dict:
-        # 管理消息队列（保留至少1条初始消息）
-        if len(self.messages) >= 6:  # 最多保留6轮对话（1条system + 5轮问答）
-            self.messages.pop(1)  # 仅删除旧的用户-助理对
-
+        if len(self.messages) >= 7:
+            self.messages.pop(1)
+            self.messages.pop(1)
         self.messages.append({"role": "user", "content": message})
-        formatted_messages = [{"role": "user", "content": msg["content"]} for msg in self.messages]  # 转换为API所需格式
-        
         responses = Application.call(
             api_key=self.api_key,
             app_id=self.app_id,
-            messages=formatted_messages,
+            messages=self.messages,
             prompt=message,
             stream=True,
-            incremental_output=True,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens
+            incremental_output=True
         )
-        
         rsp = ''
         doc_references = []
         for response in responses:
@@ -114,25 +111,20 @@ class ChatBot:
                     response_data = json.loads(response.output.text)
                     chunk = response_data.get("result", "")
                     refs = response_data.get("doc_references", [])
-                    
-                    # 处理引用格式
                     if isinstance(refs, str):
                         refs = json.loads(refs) if refs else []
-                    
-                    # 流式回调
                     if stream_callback and chunk:
-                        stream_callback(chunk)
-                    
+                        stream_callback(chunk)  # 发送实时内容到前端
+                    print(chunk, end="", flush=True)
                     rsp += chunk
-                    doc_references.extend(refs)
-                    
+                    doc_references.extend(refs)  # 累积引用
                 except json.JSONDecodeError:
                     chunk = response.output.text
                     if stream_callback:
                         stream_callback(chunk)
+                    print(chunk, end="", flush=True)
                     rsp += chunk
-        
-        self.messages.append({"role": "assistant", "content": rsp})
+        self.messages.append({"role": "assistant", "content": rsp, "doc_references": doc_references})
         return {"full_rsp": rsp, "doc_references": doc_references}
 
 # 初始化聊天机器人
@@ -154,25 +146,27 @@ if prompt := st.chat_input("Ask a question about HR policies..."):
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
         with st.chat_message("assistant", avatar="🤖") as message_placeholder:
+            # 初始化流式内容
+            current_response = st.empty()
             full_response = ""
             doc_references = []
-            stream_container = st.empty()  # 流式内容容器
             
             def stream_callback(chunk: str) -> None:
                 nonlocal full_response
                 full_response += chunk
-                stream_container.markdown(full_response + "▌")  # 显示加载状态
+                # 实时显示带加载状态的内容
+                current_response.markdown(full_response + "▌")
             
             try:
                 response = st.session_state.chatbot.ask(prompt, stream_callback)
-                full_response = response["full_rsp"].rstrip("▌")  # 移除加载符号
+                full_response = response["full_rsp"]
                 doc_references = response["doc_references"]
                 
-                # 合规性处理
-                hr_compliant_response = re.sub(r'<ref>.*?</ref>', '', full_response)
-                hr_compliant_response = f"{hr_compliant_response}\n\n---\n*For further HR assistance, contact your local HR representative.*"
+                # 清理引用标签并添加合规提示
+                cleaned_response = re.sub(r'<ref>.*?</ref>', '', full_response)
+                hr_compliant_response = f"{cleaned_response}\n\n---\n*For further HR assistance, contact your local HR representative.*"
                 
-                # 显示最终内容
+                # 显示完整内容（替换加载状态）
                 message_placeholder.markdown(hr_compliant_response)
                 
                 if doc_references:
@@ -186,7 +180,6 @@ if prompt := st.chat_input("Ask a question about HR policies..."):
                 
             except Exception as e:
                 message_placeholder.error(f"⚠️ Error: {str(e)}")
-                stream_container.empty()  # 清空错误状态
 
 # ===== 年假计算器模块 =====
 if st.session_state.show_leave_calculator:
@@ -294,8 +287,7 @@ with st.sidebar:
         }
         st.session_state.show_leave_calculator = False
         st.session_state.doc_references = {}
-        if api_key and app_id:
-            st.session_state.chatbot = ChatBot(api_key, app_id)
+        st.session_state.chatbot = ChatBot(api_key, app_id)
         st.rerun()
 
     st.divider()
