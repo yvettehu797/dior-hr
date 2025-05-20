@@ -164,33 +164,31 @@ if prompt := st.chat_input("Ask a question about HR policies..."):
             st.markdown(prompt)
         with st.chat_message("assistant", avatar="🤖") as message_placeholder:
             current_response = st.empty()  # 动态更新区域
-            full_result = ""  # 定义在外部作用域，供回调函数访问
+            # 使用列表存储结果（可变对象，避免nonlocal作用域问题）
+            response_container = [""]
             
             # 流式回调：显示原始文本流
             def stream_callback(raw_chunk: str):
-                # 使用 `nonlocal` 引用外层函数的 `full_result`
-                nonlocal full_result
-                current_response.markdown(raw_chunk + "▌")  # 实时显示原始流+加载符
-                
-                # 尝试从原始文本中提取result（适用于流式分段返回JSON的场景）
-                try:
-                    chunk_data = json.loads(raw_chunk)
-                    result_chunk = chunk_data.get("result", "")
-                    full_result += result_chunk  # 累积解析后的result
-                except json.JSONDecodeError:
-                    pass  # 非JSON分段不处理
+                response_container[0] += raw_chunk  # 直接修改列表内容
+                current_response.markdown(response_container[0] + "▌")  # 实时显示原始流+加载符
             
             try:
                 response = st.session_state.chatbot.ask(prompt, stream_callback)
-                # 直接使用回调函数中累积的full_result（避免重复赋值）
-                doc_references = response["doc_references"]
+                raw_stream = response_container[0]  # 获取完整原始流
                 
-                # 最终呈现解析后的result（清理格式）
+                # 解析最终结果（假设最终流是完整JSON）
+                try:
+                    full_result = json.loads(raw_stream).get("result", "")
+                except:
+                    full_result = raw_stream  # 解析失败时使用原始文本
+                
+                # 清理格式并显示
                 cleaned_result = re.sub(r'<ref>.*?</ref>', '', full_result)
                 final_response = f"{cleaned_result}\n\n---\n*For further HR assistance, contact your local HR representative.*"
-                
-                # 替换为最终内容
                 message_placeholder.markdown(final_response)
+                
+                # 处理文档引用（从API响应中获取，而非流式解析）
+                doc_references = response["doc_references"]
                 if doc_references:
                     show_references(doc_references)
                 
