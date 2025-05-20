@@ -7,7 +7,6 @@ import sys
 import json
 import pandas as pd
 from typing import Dict, Callable, List, Any
-import time  # 新增：用于模拟流式延迟
 
 # 页面设置
 st.set_page_config(page_title="Dior HR Assistant", page_icon=":robot:")
@@ -82,20 +81,18 @@ def show_references(doc_references):
             else:
                 st.image(f'images/{reference}.png', caption=reference, use_container_width=True)
 
-# 聊天机器人类（优化流式输出逻辑）
+# 聊天机器人类
 class ChatBot:
     def __init__(self, api_key: str, app_id: str):
         self.api_key = api_key
         self.app_id = app_id
         self.messages = []
 
-    def ask(self, message: str) -> Dict:
+    def ask(self, message: str, stream_callback: Callable[[str], None] = None) -> Dict:
         if len(self.messages) >= 7:
-            self.messages.pop(1)  # 保留首尾，移除中间对话（共保留5轮对话）
+            self.messages.pop(1)
             self.messages.pop(1)
         self.messages.append({"role": "user", "content": message})
-
-        # 初始化流式响应
         responses = Application.call(
             api_key=self.api_key,
             app_id=self.app_id,
@@ -103,51 +100,33 @@ class ChatBot:
             prompt=message,
             stream=True,
             incremental_output=True,
-            temperature=temperature,  # 传入温度参数
-            top_p=top_p,
-            max_tokens=max_tokens,
-            has_thoughts=True  # 确保返回思考内容
+            flow_stream_mode="agent_format"
         )
-
-        full_rsp = ""
+        rsp = ''
         doc_references = []
         for response in responses:
             if response.status_code != HTTPStatus.OK:
                 print(f'request_id={response.request_id} code={response.status_code} message={response.message}')
-            else:
-                # 流式输出时使用thoughts内容
-                stream_content = response.output.thoughts or ""
-                # 最终回答仍使用text内容
-                final_content = response.output.text or ""
-
+            elif response.output.text is not None:
                 try:
-                    # 尝试解析thoughts中的结构化内容（如有）
-                    if isinstance(stream_content, str):
-                        stream_data = json.loads(stream_content) if stream_content else {}
-                        chunk = stream_data.get("result", "") or stream_content
-                    else:
-                        chunk = str(stream_content)
-
-                    refs = response.output.doc_references or []
+                    response_data = json.loads(response.output.text)
+                    chunk = response_data.get("result", "")
+                    refs = response_data.get("doc_references", [])
                     if isinstance(refs, str):
                         refs = json.loads(refs) if refs else []
-
-                    full_rsp = final_content  # 最终回答保持text内容
+                    if stream_callback and chunk:
+                        stream_callback(chunk)
+                    print(chunk, end="", flush=True)
+                    rsp += chunk
                     doc_references = refs
-                    yield chunk, doc_references  # 流式返回thoughts内容和引用
-
                 except json.JSONDecodeError:
-                    chunk = stream_content
-                    full_rsp = final_content
-                    yield chunk, doc_references  # 流式返回原始thoughts文本
-
-        # 处理最终响应（非流式部分）
-        self.messages.append({
-            "role": "assistant",
-            "content": full_rsp,
-            "doc_references": doc_references
-        })
-        return {"full_rsp": full_rsp, "doc_references": doc_references}
+                    chunk = response.output.text
+                    if stream_callback:
+                        stream_callback(chunk)
+                    print(chunk, end="", flush=True)
+                    rsp += chunk
+        self.messages.append({"role": "assistant", "content": rsp, "doc_references": doc_references})
+        return {"full_rsp": rsp, "doc_references": doc_references}
 
 # 初始化聊天机器人
 if "chatbot" not in st.session_state and api_key and app_id:
@@ -161,60 +140,43 @@ for msg in st.session_state.messages:
         if msg["role"] == "assistant" and msg.get("doc_references"):
             show_references(msg["doc_references"])
 
-# 用户输入处理（优化流式更新逻辑）
+# 用户输入处理
 if prompt := st.chat_input("Ask a question about HR policies..."):
     if api_key and app_id:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
-
-        # 流式输出容器
-        with st.chat_message("assistant", avatar="🤖") as message_container:
-            message_placeholder = st.empty()  # 创建空容器用于实时更新
-            full_response = ""
-            doc_references = []
-
+        with st.chat_message("assistant", avatar="🤖"):
+            message_placeholder = st.empty()
+            resp_container = [""]
+            def stream_callback(chunk: str) -> None:
+                resp_container[0] += chunk
+                message_placeholder.markdown(resp_container[0] + "▌")
             try:
-                # 调用流式API并逐段处理
-                chatbot = st.session_state.chatbot
-                stream_generator = chatbot.ask(prompt)  # 获取流式生成器
-
-                for chunk, refs in stream_generator:
-                    full_response += chunk
-                    doc_references = refs
-
-                    # 清理临时标记（如<ref>标签）
-                    cleaned_chunk = re.sub(r'<ref>.*?</ref>', '', full_response)
-
-                    # 实时更新内容（添加加载提示符号）
-                    message_placeholder.markdown(f"{cleaned_chunk}▌")
-                    time.sleep(0.05)  # 控制流式速度（可根据网络调整）
-                    st.rerun()  # 强制刷新页面显示最新内容
-
-                # 处理最终响应
-                hr_compliant_response = f"{cleaned_chunk}\n\n---\n*For further HR assistance, contact your local HR representative.*"
+                response = st.session_state.chatbot.ask(prompt, stream_callback)
+                full_response = response["full_rsp"]
+                doc_references = response["doc_references"]
+                cleaned_response = re.sub(r'<ref>.*?</ref>', '', full_response)
+                hr_compliant_response = f"{cleaned_response}\n\n---\n*For further HR assistance, contact your local HR representative.*"
                 message_placeholder.markdown(hr_compliant_response)
-
-                # 记录完整响应和引用
+                if doc_references:
+                    show_references(doc_references)
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": hr_compliant_response,
                     "doc_references": doc_references
                 })
-
-                # 显示文档引用
-                if doc_references:
-                    show_references(doc_references)
-
             except Exception as e:
                 message_placeholder.error(f"⚠️ Error: {str(e)}")
-                st.session_state.messages.pop()  # 移除未完成的响应记录
 
+# ===== 年假计算器模块 =====
+# ===== 年假计算器模块 =====
 # ===== 年假计算器模块 =====
 if st.session_state.show_leave_calculator:
     st.divider()
     st.header("📅 Annual Leave Calculator", divider="gray")
-
+    
+    # 职位类别下拉框（修复 value -> index）
     options = [
         "Retail and HO General Staffs & Supervisors",
         "Retail and HO Assistant Managers",
@@ -222,17 +184,19 @@ if st.session_state.show_leave_calculator:
         "Sr. Flagship Boutique Manager/ Area Manager",
         "Associate Directors / Directors and above"
     ]
-
+    
+    # 获取当前值的索引
     current_value = st.session_state.leave_calculator_state["job_category"]
     current_index = options.index(current_value) if current_value in options else 0
-
+    
     st.session_state.leave_calculator_state["job_category"] = st.selectbox(
         "Job Category",
         options=options,
         key="annual_leave_category_select",
-        index=current_index
+        index=current_index  # 使用 index 参数
     )
 
+    # 服务年限输入（保持不变）
     st.session_state.leave_calculator_state["years_service"] = st.number_input(
         "Years of Service",
         min_value=0,
@@ -241,10 +205,11 @@ if st.session_state.show_leave_calculator:
         key="annual_leave_years_input",
     )
 
+    # 计算逻辑（保持不变）
     def calculate_leave():
         category = st.session_state.leave_calculator_state["job_category"]
         years = st.session_state.leave_calculator_state["years_service"]
-
+        
         base_mapping = {
             "Retail and HO General Staffs & Supervisors": 10,
             "Retail and HO Assistant Managers": 12,
@@ -253,16 +218,16 @@ if st.session_state.show_leave_calculator:
             "Associate Directors / Directors and above": 20
         }
         base = base_mapping.get(category, 0)
-
+        
         bonus = 0
         if years >= 2:
             bonus += 2
             if years >= 5:
                 if category in ["Associate Directors / Directors and above", "Sr. Flagship Boutique Manager/ Area Manager"]:
-                    bonus += 1
+                    bonus += 1 
                 else:
-                    bonus += 3
-
+                    bonus += 3 
+        
         cap_mapping = {
             "Retail and HO General Staffs & Supervisors": 15,
             "Retail and HO Assistant Managers": 17,
@@ -279,9 +244,11 @@ if st.session_state.show_leave_calculator:
             "leave_cap": cap
         }
 
+    # 计算按钮（可选：为按钮添加唯一key）
     if st.button("Calculate Annual Leave", type="primary", key="annual_leave_calculate_btn"):
         st.session_state.leave_calculator_state["result"] = calculate_leave()
 
+    # 显示结果（保持不变）
     if st.session_state.leave_calculator_state["result"]:
         result = st.session_state.leave_calculator_state["result"]
         st.subheader("Calculation Results")
@@ -291,9 +258,10 @@ if st.session_state.show_leave_calculator:
             st.metric("Service Bonus", f"+{result['service_bonus']} days")
         with col2:
             st.metric("Total Leave", f"{result['total_leave']} days", delta=f"({result['total_leave'] / result['leave_cap'] * 100:.1f}% of max)")
-
+        
         st.progress(result['total_leave'] / result['leave_cap'], text="Progress towards maximum leave")
 
+    # 政策参考表（保持不变）
     st.subheader("Annual Leave Policy Reference")
     st.markdown("""
     | Job Category | Base Leave | Service Bonus | Maximum Leave |
@@ -316,9 +284,9 @@ with st.sidebar:
         }
         st.session_state.show_leave_calculator = False
         st.session_state.doc_references = {}
-        if "chatbot" in st.session_state:
-            del st.session_state.chatbot  # 重新初始化时会自动创建新实例
+        st.session_state.chatbot = ChatBot(api_key, app_id)
         st.rerun()
+
 
     st.divider()
     st.caption("© 2025 Dior HR Assistant")
