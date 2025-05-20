@@ -7,6 +7,7 @@ import sys
 import json
 import pandas as pd
 from typing import Dict, Callable, List, Any
+import time  # 新增：用于模拟流式延迟
 
 # 页面设置
 st.set_page_config(page_title="Dior HR Assistant", page_icon=":robot:")
@@ -81,27 +82,33 @@ def show_references(doc_references):
             else:
                 st.image(f'images/{reference}.png', caption=reference, use_container_width=True)
 
-# 聊天机器人类
+# 聊天机器人类（优化流式输出逻辑）
 class ChatBot:
     def __init__(self, api_key: str, app_id: str):
         self.api_key = api_key
         self.app_id = app_id
         self.messages = []
 
-    def ask(self, message: str, stream_callback: Callable[[str], None] = None) -> Dict:
+    def ask(self, message: str) -> Dict:
         if len(self.messages) >= 7:
-            self.messages.pop(1)
+            self.messages.pop(1)  # 保留首尾，移除中间对话（共保留5轮对话）
             self.messages.pop(1)
         self.messages.append({"role": "user", "content": message})
+        
+        # 初始化流式响应
         responses = Application.call(
             api_key=self.api_key,
             app_id=self.app_id,
             messages=self.messages,
             prompt=message,
             stream=True,
-            incremental_output=True
+            incremental_output=True,
+            temperature=temperature,  # 新增：传入温度参数
+            top_p=top_p,
+            max_tokens=max_tokens
         )
-        rsp = ''
+        
+        full_rsp = ""
         doc_references = []
         for response in responses:
             if response.status_code != HTTPStatus.OK:
@@ -113,19 +120,17 @@ class ChatBot:
                     refs = response_data.get("doc_references", [])
                     if isinstance(refs, str):
                         refs = json.loads(refs) if refs else []
-                    if stream_callback and chunk:
-                        stream_callback(chunk)  # 发送实时内容到前端
-                    print(chunk, end="", flush=True)
-                    rsp += chunk
-                    doc_references.extend(refs)  # 累积引用
+                    full_rsp += chunk  # 逐段累加响应
+                    doc_references = refs
+                    yield chunk, doc_references  # 流式返回每段内容和引用
                 except json.JSONDecodeError:
                     chunk = response.output.text
-                    if stream_callback:
-                        stream_callback(chunk)
-                    print(chunk, end="", flush=True)
-                    rsp += chunk
-        self.messages.append({"role": "assistant", "content": rsp, "doc_references": doc_references})
-        return {"full_rsp": rsp, "doc_references": doc_references}
+                    full_rsp += chunk
+                    yield chunk, doc_references  # 流式返回原始文本
+        
+        # 处理最终响应（非流式部分）
+        self.messages.append({"role": "assistant", "content": full_rsp, "doc_references": doc_references})
+        return {"full_rsp": full_rsp, "doc_references": doc_references}
 
 # 初始化聊天机器人
 if "chatbot" not in st.session_state and api_key and app_id:
@@ -139,47 +144,54 @@ for msg in st.session_state.messages:
         if msg["role"] == "assistant" and msg.get("doc_references"):
             show_references(msg["doc_references"])
 
-# 用户输入处理
+# 用户输入处理（优化流式更新逻辑）
 if prompt := st.chat_input("Ask a question about HR policies..."):
     if api_key and app_id:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
-        with st.chat_message("assistant", avatar="🤖") as message_placeholder:
-            # 初始化流式内容
-            current_response = st.empty()
+        
+        # 流式输出容器
+        with st.chat_message("assistant", avatar="🤖") as message_container:
+            message_placeholder = st.empty()  # 创建空容器用于实时更新
             full_response = ""
             doc_references = []
             
-            def stream_callback(chunk: str) -> None:
-                nonlocal full_response
-                full_response += chunk
-                # 实时显示带加载状态的内容
-                current_response.markdown(full_response + "▌")
-            
             try:
-                response = st.session_state.chatbot.ask(prompt, stream_callback)
-                full_response = response["full_rsp"]
-                doc_references = response["doc_references"]
+                # 调用流式API并逐段处理
+                chatbot = st.session_state.chatbot
+                stream_generator = chatbot.ask(prompt)  # 获取流式生成器
                 
-                # 清理引用标签并添加合规提示
-                cleaned_response = re.sub(r'<ref>.*?</ref>', '', full_response)
-                hr_compliant_response = f"{cleaned_response}\n\n---\n*For further HR assistance, contact your local HR representative.*"
+                for chunk, refs in stream_generator:
+                    full_response += chunk
+                    doc_references = refs
+                    
+                    # 清理临时标记（如<ref>标签）
+                    cleaned_chunk = re.sub(r'<ref>.*?</ref>', '', full_response)
+                    
+                    # 实时更新内容（添加加载提示符号）
+                    message_placeholder.markdown(f"{cleaned_chunk}▌")
+                    time.sleep(0.05)  # 控制流式速度（可根据网络调整）
+                    st.rerun()  # 强制刷新页面显示最新内容
                 
-                # 显示完整内容（替换加载状态）
+                # 处理最终响应
+                hr_compliant_response = f"{cleaned_chunk}\n\n---\n*For further HR assistance, contact your local HR representative.*"
                 message_placeholder.markdown(hr_compliant_response)
                 
-                if doc_references:
-                    show_references(doc_references)
-                
+                # 记录完整响应和引用
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": hr_compliant_response,
                     "doc_references": doc_references
                 })
                 
+                # 显示文档引用
+                if doc_references:
+                    show_references(doc_references)
+                
             except Exception as e:
                 message_placeholder.error(f"⚠️ Error: {str(e)}")
+                st.session_state.messages.pop()  # 移除未完成的响应记录
 
 # ===== 年假计算器模块 =====
 if st.session_state.show_leave_calculator:
@@ -287,7 +299,8 @@ with st.sidebar:
         }
         st.session_state.show_leave_calculator = False
         st.session_state.doc_references = {}
-        st.session_state.chatbot = ChatBot(api_key, app_id)
+        if "chatbot" in st.session_state:
+            del st.session_state.chatbot  # 重新初始化时会自动创建新实例
         st.rerun()
 
     st.divider()
