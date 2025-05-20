@@ -7,7 +7,6 @@ import sys
 import json
 import pandas as pd
 from typing import Dict, Callable, List, Any
-import time  # 新增：用于模拟流式延迟
 
 # 页面设置
 st.set_page_config(page_title="Dior HR Assistant", page_icon=":robot:")
@@ -82,55 +81,80 @@ def show_references(doc_references):
             else:
                 st.image(f'images/{reference}.png', caption=reference, use_container_width=True)
 
-# 聊天机器人类（优化流式输出逻辑）
+# 聊天机器人类
 class ChatBot:
     def __init__(self, api_key: str, app_id: str):
         self.api_key = api_key
         self.app_id = app_id
         self.messages = []
 
-    def ask(self, message: str) -> Dict:
+    def ask(self, message: str, stream_callback: Callable[[str], None] = None) -> Dict:
         if len(self.messages) >= 7:
-            self.messages.pop(1)  # 保留首尾，移除中间对话（共保留5轮对话）
-            self.messages.pop(1)
-        self.messages.append({"role": "user", "content": message})
+            self.messages.pop(1)  # 保留首尾，仅删除中间对话（示例逻辑，可根据需求调整）
         
-        # 初始化流式响应
+        self.messages.append({"role": "user", "content": message})
         responses = Application.call(
             api_key=self.api_key,
             app_id=self.app_id,
             messages=self.messages,
             prompt=message,
             stream=True,
-            incremental_output=True,
-            flow_stream_mode="agent_format"),
-            temperature=temperature,  # 新增：传入温度参数
-            top_p=top_p,
-            max_tokens=max_tokens
+            incremental_output=True
         )
         
         full_rsp = ""
         doc_references = []
+        json_pattern = re.compile(r'({.*?})$', re.DOTALL)  # 匹配末尾的 JSON 结构
+        
         for response in responses:
             if response.status_code != HTTPStatus.OK:
-                print(f'request_id={response.request_id} code={response.status_code} message={response.message}')
-            elif response.output.text is not None:
+                print(f"Request failed: {response.message}")
+                continue
+            
+            output_text = response.output.text or ""
+            
+            # 尝试提取 JSON 部分（假设 JSON 位于文本末尾）
+            match = json_pattern.search(output_text)
+            if match:
+                json_str = match.group(1)
+                natural_text = output_text[:match.start()].strip()  # 自然语言部分
                 try:
-                    response_data = json.loads(response.output.text)
-                    chunk = response_data.get("result", "")
-                    refs = response_data.get("doc_references", [])
+                    json_data = json.loads(json_str)
+                    full_rsp += natural_text  # 先添加自然语言内容
+                    
+                    # 提取文档引用（处理列表或字符串情况）
+                    refs = json_data.get("doc_references", [])
                     if isinstance(refs, str):
                         refs = json.loads(refs) if refs else []
-                    full_rsp += chunk  # 逐段累加响应
                     doc_references = refs
-                    yield chunk, doc_references  # 流式返回每段内容和引用
+                    
+                    # 处理结果字段（若存在）
+                    result = json_data.get("result", "")
+                    if result:
+                        full_rsp += result
                 except json.JSONDecodeError:
-                    chunk = response.output.text
-                    full_rsp += chunk
-                    yield chunk, doc_references  # 流式返回原始文本
+                    full_rsp += output_text  # 解析失败时 fallback 至原始文本
+            else:
+                full_rsp += output_text  # 无 JSON 时直接累加文本
+            
+            # 流式输出处理
+            if stream_callback and output_text:
+                stream_callback(output_text)
+            print(output_text, end="", flush=True)
         
-        # 处理最终响应（非流式部分）
-        self.messages.append({"role": "assistant", "content": full_rsp, "doc_references": doc_references})
+        # 清理可能残留的 JSON 标记（如首尾括号/逗号）
+        full_rsp = re.sub(r'^[\{\",]|[\}\",]$', '', full_rsp).strip()
+        
+        # 确保文档引用为列表类型
+        if not isinstance(doc_references, list):
+            doc_references = [doc_references] if doc_references else []
+        
+        # 存储对话历史（包含文档引用）
+        self.messages.append({
+            "role": "assistant",
+            "content": full_rsp,
+            "doc_references": doc_references
+        })
         return {"full_rsp": full_rsp, "doc_references": doc_references}
 
 # 初始化聊天机器人
@@ -145,54 +169,38 @@ for msg in st.session_state.messages:
         if msg["role"] == "assistant" and msg.get("doc_references"):
             show_references(msg["doc_references"])
 
-# 用户输入处理（优化流式更新逻辑）
+# 用户输入处理
 if prompt := st.chat_input("Ask a question about HR policies..."):
     if api_key and app_id:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
-        
-        # 流式输出容器
-        with st.chat_message("assistant", avatar="🤖") as message_container:
-            message_placeholder = st.empty()  # 创建空容器用于实时更新
-            full_response = ""
-            doc_references = []
-            
+        with st.chat_message("assistant", avatar="🤖"):
+            message_placeholder = st.empty()
+            resp_container = [""]
+            def stream_callback(chunk: str) -> None:
+                resp_container[0] += chunk
+                message_placeholder.markdown(resp_container[0] + "▌")
             try:
-                # 调用流式API并逐段处理
-                chatbot = st.session_state.chatbot
-                stream_generator = chatbot.ask(prompt)  # 获取流式生成器
+                response = st.session_state.chatbot.ask(prompt, stream_callback)
+                full_response = response["full_rsp"]
+                doc_references = response["doc_references"]
                 
-                for chunk, refs in stream_generator:
-                    full_response += chunk
-                    doc_references = refs
-                    
-                    # 清理临时标记（如<ref>标签）
-                    cleaned_chunk = re.sub(r'<ref>.*?</ref>', '', full_response)
-                    
-                    # 实时更新内容（添加加载提示符号）
-                    message_placeholder.markdown(f"{cleaned_chunk}▌")
-                    time.sleep(0.05)  # 控制流式速度（可根据网络调整）
-                    st.rerun()  # 强制刷新页面显示最新内容
-                
-                # 处理最终响应
-                hr_compliant_response = f"{cleaned_chunk}\n\n---\n*For further HR assistance, contact your local HR representative.*"
+                # 添加合规性尾部提示
+                hr_compliant_response = f"{full_response}\n\n---\n*For further HR assistance, contact your local HR representative.*"
                 message_placeholder.markdown(hr_compliant_response)
                 
-                # 记录完整响应和引用
+                if doc_references:
+                    show_references(doc_references)
+                
+                # 更新会话状态
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": hr_compliant_response,
                     "doc_references": doc_references
                 })
-                
-                # 显示文档引用
-                if doc_references:
-                    show_references(doc_references)
-                
             except Exception as e:
                 message_placeholder.error(f"⚠️ Error: {str(e)}")
-                st.session_state.messages.pop()  # 移除未完成的响应记录
 
 # ===== 年假计算器模块 =====
 if st.session_state.show_leave_calculator:
@@ -300,8 +308,8 @@ with st.sidebar:
         }
         st.session_state.show_leave_calculator = False
         st.session_state.doc_references = {}
-        if "chatbot" in st.session_state:
-            del st.session_state.chatbot  # 重新初始化时会自动创建新实例
+        if api_key and app_id:
+            st.session_state.chatbot = ChatBot(api_key, app_id)
         st.rerun()
 
     st.divider()
