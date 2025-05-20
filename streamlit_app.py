@@ -99,8 +99,8 @@ class ChatBot:
             messages=self.messages,
             prompt=message,
             stream=True,
-            incremental_output=True,
-            flow_stream_mode="agent_format"
+            flow_stream_mode="agent_format",
+            incremental_output=True
         )
         rsp = ''
         doc_references = []
