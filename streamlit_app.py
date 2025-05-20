@@ -164,10 +164,11 @@ if prompt := st.chat_input("Ask a question about HR policies..."):
             st.markdown(prompt)
         with st.chat_message("assistant", avatar="🤖") as message_placeholder:
             current_response = st.empty()  # 动态更新区域
-            full_result = ""  # 最终解析后的result
+            full_result = ""  # 定义在外部作用域，供回调函数访问
             
             # 流式回调：显示原始文本流
             def stream_callback(raw_chunk: str):
+                # 使用 `nonlocal` 引用外层函数的 `full_result`
                 nonlocal full_result
                 current_response.markdown(raw_chunk + "▌")  # 实时显示原始流+加载符
                 
@@ -175,13 +176,13 @@ if prompt := st.chat_input("Ask a question about HR policies..."):
                 try:
                     chunk_data = json.loads(raw_chunk)
                     result_chunk = chunk_data.get("result", "")
-                    full_result += result_chunk
-                except:
+                    full_result += result_chunk  # 累积解析后的result
+                except json.JSONDecodeError:
                     pass  # 非JSON分段不处理
             
             try:
                 response = st.session_state.chatbot.ask(prompt, stream_callback)
-                full_result = response["full_rsp"]
+                # 直接使用回调函数中累积的full_result（避免重复赋值）
                 doc_references = response["doc_references"]
                 
                 # 最终呈现解析后的result（清理格式）
