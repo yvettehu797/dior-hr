@@ -130,9 +130,9 @@ class ChatBot:
                     doc_references = refs
                     
                     # 处理结果字段（若存在）
-                    result = json_data.get("result", "")
-                    if result:
-                        full_rsp += result
+                    #result = json_data.get("result", "")
+                    #if result:
+                        #full_rsp += result
                 except json.JSONDecodeError:
                     full_rsp += output_text  # 解析失败时 fallback 至原始文本
             else:
